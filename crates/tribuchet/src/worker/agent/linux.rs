@@ -182,7 +182,8 @@ pub(super) fn spawn_builder(
         drop(theirs);
         let policy = spec.net_policy.clone();
         let build_pid = child.id();
-        thread::spawn(move || net_forward(&ours, policy, build_pid));
+        let ipv4_only = spec.net_family == sandbox::GuestNetwork::Ipv4Only;
+        thread::spawn(move || net_forward(&ours, policy, build_pid, ipv4_only));
     }
     // The setup stage waits for the spec on stdin; move it into the
     // build cgroup first so its cgroup namespace is rooted there.
@@ -198,7 +199,7 @@ pub(super) fn spawn_builder(
 /// Per-build network forwarder: receive the tap fd the setup stage
 /// created inside its netns, run the presto-pasta datapath on it and
 /// stop it (letting the netns go away) once the build process dies.
-fn net_forward(sock: &OwnedFd, policy: NetPolicy, build_pid: u32) {
+fn net_forward(sock: &OwnedFd, policy: NetPolicy, build_pid: u32, ipv4_only: bool) {
     let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
     let mut cmsg = RecvAncillaryBuffer::new(&mut space);
     let mut buf = [0u8; 8];
@@ -212,6 +213,7 @@ fn net_forward(sock: &OwnedFd, policy: NetPolicy, build_pid: u32) {
     };
     let Some(tap) = fds.next() else { return };
     let net = presto_pasta::Config {
+        ipv6: !ipv4_only,
         allow_flow: Some(Arc::new(move |d: &presto_pasta::FlowDst| {
             policy.allows(d.proto, d.ip, d.port)
         })),

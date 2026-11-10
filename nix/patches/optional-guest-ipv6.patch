@@ -1,0 +1,93 @@
+From adee40ed85c9827351e623579ae5bfde1ea90db9 Mon Sep 17 00:00:00 2001
+From: mulatta <67085791+mulatta@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 13:08:06 +0900
+Subject: [PATCH] netdev: allow IPv4-only guest configuration
+
+An IPv4-only host cannot service the IPv6 default route installed in the guest. Allow callers to leave IPv6 unconfigured so connects fail locally instead of waiting for the forwarder to time out.
+---
+ src/lib.rs     |  4 ++++
+ src/netdev.rs  |  3 +++
+ tests/netns.rs | 34 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 41 insertions(+)
+
+diff --git a/src/lib.rs b/src/lib.rs
+index cec1e73..f0a7c51 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -125,6 +125,9 @@ pub struct Config {
+     /// via DNS64. [`Config::allow_flow`] still sees the guest's IPv4
+     /// destination.
+     pub nat64_prefix: Option<Ipv6Addr>,
++    /// Configure IPv6 addresses and routes in the guest namespace.
++    /// Disable this when the host cannot provide public IPv6 connectivity.
++    pub ipv6: bool,
+ }
+ 
+ impl Config {
+@@ -157,6 +160,7 @@ impl Default for Config {
+             buffers: 96,
+             allow_flow: None,
+             nat64_prefix: None,
++            ipv6: true,
+         }
+     }
+ }
+diff --git a/src/netdev.rs b/src/netdev.rs
+index 850234e..f0d5e5b 100644
+--- a/src/netdev.rs
++++ b/src/netdev.rs
+@@ -289,6 +289,9 @@ pub fn configure(ifname: &str, cfg: &Config) -> io::Result<()> {
+         (IpAddr::V4(cfg.guest4), IpAddr::V4(cfg.gateway4)),
+         (IpAddr::V6(cfg.guest6), IpAddr::V6(cfg.gateway6)),
+     ] {
++        if guest.is_ipv6() && !cfg.ipv6 {
++            continue;
++        }
+         add_addr(&sock, ifindex, guest)?;
+         add_neighbor(&sock, ifindex, gateway, cfg.gateway_mac)?;
+         add_default_route(&sock, ifindex, gateway)?;
+diff --git a/tests/netns.rs b/tests/netns.rs
+index 691a118..b3e28ea 100644
+--- a/tests/netns.rs
++++ b/tests/netns.rs
+@@ -646,6 +646,40 @@ fn udp_unreachable() {
+     run_in_userns("unreachable-host", "udp_unreachable", &[]);
+ }
+ 
++#[test]
++fn ipv4_only() {
++    if std::env::var(ROLE).as_deref() == Ok("ipv4-only") {
++        ip("link set lo up");
++        ip("link add t0 type dummy");
++        let cfg = presto_pasta::Config {
++            ipv6: false,
++            ..Default::default()
++        };
++        presto_pasta::netdev::configure("t0", &cfg).expect("configure IPv4-only guest");
++        let v4 = UdpSocket::bind("0.0.0.0:0").expect("bind IPv4");
++        v4.connect("192.0.2.1:443").expect("IPv4 route");
++        let v6 = UdpSocket::bind("[::]:0").expect("bind IPv6");
++        let error = v6.connect("[2606:4700:4700::1111]:443").unwrap_err();
++        assert_eq!(error.raw_os_error(), Some(libc::ENETUNREACH));
++        let error = std::net::TcpStream::connect_timeout(
++            &"[2606:4700:4700::1111]:443".parse().unwrap(),
++            std::time::Duration::from_millis(200),
++        )
++        .unwrap_err();
++        assert_eq!(error.raw_os_error(), Some(libc::ENETUNREACH));
++        let error = UdpSocket::bind((cfg.guest6, 0)).unwrap_err();
++        assert_eq!(error.raw_os_error(), Some(libc::EADDRNOTAVAIL));
++
++        presto_pasta::netdev::configure("t0", &presto_pasta::Config::default())
++            .expect("configure dual-stack guest");
++        UdpSocket::bind((cfg.guest6, 0)).expect("default IPv6 guest address");
++        v6.connect("[2606:4700:4700::1111]:443")
++            .expect("default IPv6 route");
++        exit(0);
++    }
++    run_in_userns("ipv4-only", "ipv4_only", &[]);
++}
++
+ /// Host namespace for the NAT64 test: services listen only on an IPv6
+ /// address that embeds 10.0.0.1 into the `fd00:64::/96` prefix; there is
+ /// no IPv4 service at all, mirroring an IPv6-only host.

@@ -35,7 +35,7 @@ use std::path::Path;
 use std::process::exit;
 use std::{env, mem, ptr};
 
-use super::super::{SandboxSpec, binfmt};
+use super::super::{GuestNetwork, SandboxSpec, binfmt};
 use super::{create_mount_points, exit_status_file, setup_error_file, write_skeleton};
 
 use crate::fsutil::io_ctx;
@@ -200,8 +200,11 @@ fn open_tap(name: &str) -> io::Result<OwnedFd> {
 /// until the datapath runs.
 /// The local tap fd is closed afterwards
 /// because the agent's copy keeps the interface carrier up.
-fn attach_net(sock: &OwnedFd) -> io::Result<()> {
-    let net = presto_pasta::Config::default();
+fn attach_net(sock: &OwnedFd, ipv4_only: bool) -> io::Result<()> {
+    let net = presto_pasta::Config {
+        ipv6: !ipv4_only,
+        ..Default::default()
+    };
     let tap = open_tap(NET_IFNAME)?;
     presto_pasta::netdev::configure(NET_IFNAME, &net)?;
     let fds = [tap.as_fd()];
@@ -363,7 +366,7 @@ fn setup(p: &SetupParams) -> io::Result<()> {
         loopback_up().map_err(ioerr("bringing lo up"))?;
     }
     if let Some(sock) = net_fwd {
-        attach_net(&sock)?;
+        attach_net(&sock, spec.net_family == GuestNetwork::Ipv4Only)?;
     }
 
     // CLONE_NEWPID only applies to children: fork so the builder

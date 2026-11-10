@@ -218,6 +218,9 @@ pub struct WorkerConfig {
     /// evaluated when a build opens an outbound connection.
     #[serde(default)]
     pub fod_network: NetPolicy,
+    /// Leave public IPv6 unconfigured when the host only provides IPv4.
+    #[serde(default)]
+    pub fod_ipv4_only: bool,
     /// Advertise the `recursive-nix` system feature so the hub routes
     /// derivations using it here. Requires the patched Nix on the
     /// client side (see `nix/patches/`).
@@ -327,6 +330,14 @@ mod tests {
             cfg.emulate.get("aarch64-linux"),
             Some(&PathBuf::from("/nix/store/x-qemu/bin/qemu-aarch64"))
         );
+    }
+
+    #[test]
+    fn fod_ipv4_only_is_opt_in() {
+        let parse =
+            |body: &str| toml::from_str::<WorkerConfig>(&format!("hub = \"x\"\n{body}")).unwrap();
+        assert!(!parse("").fod_ipv4_only);
+        assert!(parse("fod-ipv4-only = true").fod_ipv4_only);
     }
 
     #[test]

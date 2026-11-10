@@ -38,6 +38,24 @@ use crate::netpolicy::NetPolicy;
 #[cfg(target_os = "linux")]
 use crate::proto::BuildAssignment;
 
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GuestNetwork {
+    #[default]
+    DualStack,
+    Ipv4Only,
+}
+
+impl GuestNetwork {
+    pub const fn from_ipv4_only(ipv4_only: bool) -> Self {
+        if ipv4_only {
+            Self::Ipv4Only
+        } else {
+            Self::DualStack
+        }
+    }
+}
+
 // On macOS only the fields the shared packing code reads are used;
 // the rest exists so a Linux worker's persisted spec deserializes.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -89,6 +107,9 @@ pub struct SandboxSpec {
     /// Flow policy applied to that network.
     #[serde(default)]
     pub net_policy: NetPolicy,
+    /// Match the guest routes to an IPv4-only host.
+    #[serde(default)]
+    pub net_family: GuestNetwork,
     /// Fd number of the tap-handoff socketpair end inherited from the
     /// agent, which runs the presto-pasta forwarder for the netns.
     #[serde(default)]
@@ -136,6 +157,7 @@ pub struct PrepareOpts<'a> {
     pub net_isolation: bool,
     /// Flow policy applied to that network.
     pub net_policy: NetPolicy,
+    pub net_family: GuestNetwork,
     /// Bind-mount the host nix-daemon socket into the sandbox so the
     /// builder can register inner-build outputs.
     pub recursive_nix: bool,
@@ -209,6 +231,7 @@ pub fn prepare(
         // filled in by the agent, like the namespace and cgroup
         net_isolation: opts.net_isolation && a.fixed_output,
         net_policy: opts.net_policy.clone(),
+        net_family: opts.net_family,
         net_fwd_fd: None,
         emulator: opts.emulator.map(Path::to_path_buf),
         deny_read: opts.secrets.to_vec(),
@@ -322,6 +345,29 @@ mod tests {
             fixed_output: false,
             inputs: vec![],
         }
+    }
+
+    #[test]
+    fn fod_ipv4_only_survives_agent_handoff() -> Result<()> {
+        for family in [GuestNetwork::DualStack, GuestNetwork::Ipv4Only] {
+            let dir = tempfile::tempdir()?;
+            let mut assignment = min_assignment();
+            assignment.fixed_output = true;
+            let spec = prepare(
+                &assignment,
+                dir.path(),
+                &[],
+                &PrepareOpts {
+                    net_isolation: true,
+                    net_family: family,
+                    ..Default::default()
+                },
+            )?;
+            let received: SandboxSpec = serde_json::from_slice(&serde_json::to_vec(&spec)?)?;
+            assert!(received.net_isolation);
+            assert_eq!(received.net_family, family);
+        }
+        Ok(())
     }
 
     /// recursive-nix flag toggles a daemon-socket bind; without it,

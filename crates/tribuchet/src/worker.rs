@@ -81,6 +81,7 @@ struct WorkerCtx {
     /// Flow policy for that network, from the fod-network setting.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     fod_network: NetPolicy,
+    fod_family: sandbox::GuestNetwork,
     max_silent_time: Duration,
     max_log_size: u64,
     /// memory.max for each build's cgroup.
@@ -372,6 +373,7 @@ async fn run_async(opts: WorkerConfig) -> Result<()> {
         emulators,
         fod_isolation,
         fod_network: opts.fod_network.clone(),
+        fod_family: sandbox::GuestNetwork::from_ipv4_only(opts.fod_ipv4_only),
         max_silent_time: Duration::from_secs(opts.max_silent_time_secs),
         max_log_size: opts.max_log_size,
         build_memory_max_bytes: opts.build_memory_max_bytes,

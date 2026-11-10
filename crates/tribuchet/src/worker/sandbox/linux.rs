@@ -7,7 +7,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{SandboxSpec, binfmt};
+use super::{GuestNetwork, SandboxSpec, binfmt};
 
 use super::{Error, step};
 
@@ -104,7 +104,11 @@ fn write_skeleton(spec: &SandboxSpec) -> Result<(), Error> {
             // the sandbox at them, not the host resolv.conf whose
             // nameserver may be an unreachable loopback stub.
             let net = presto_pasta::Config::default();
-            let conf = format!("nameserver {}\nnameserver {}\n", net.gateway4, net.gateway6);
+            let conf = if spec.net_family == GuestNetwork::Ipv4Only {
+                format!("nameserver {}\n", net.gateway4)
+            } else {
+                format!("nameserver {}\nnameserver {}\n", net.gateway4, net.gateway6)
+            };
             fs::write(root.join("etc/resolv.conf"), conf)
                 .map_err(io_ctx("writing", &root.join("etc/resolv.conf")))?;
         } else if let Ok(data) = fs::read("/etc/resolv.conf") {
@@ -213,4 +217,34 @@ pub fn setup_error_detail(spec: &SandboxSpec) -> Option<String> {
     fs::read_to_string(setup_error_file(&spec.root))
         .ok()
         .filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as StdError;
+
+    #[test]
+    fn fod_resolvers_match_guest_address_families() -> Result<(), Box<dyn StdError>> {
+        let net = presto_pasta::Config::default();
+        for family in [GuestNetwork::DualStack, GuestNetwork::Ipv4Only] {
+            let dir = tempfile::tempdir()?;
+            let spec = SandboxSpec {
+                root: dir.path().to_path_buf(),
+                network: true,
+                net_isolation: true,
+                net_family: family,
+                ..Default::default()
+            };
+            write_skeleton(&spec)?;
+            let actual = fs::read_to_string(dir.path().join("etc/resolv.conf"))?;
+            let expected = if family == GuestNetwork::Ipv4Only {
+                format!("nameserver {}\n", net.gateway4)
+            } else {
+                format!("nameserver {}\nnameserver {}\n", net.gateway4, net.gateway6)
+            };
+            assert_eq!(actual, expected);
+        }
+        Ok(())
+    }
 }

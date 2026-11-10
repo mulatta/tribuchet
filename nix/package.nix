@@ -22,6 +22,19 @@ let
     pname = "tribuchet";
     version = "0.1.0";
     inherit src;
+    # PR #50 was closed without merging. Keep this until presto-pasta
+    # exposes an equivalent guest IPv6 configuration option.
+    cargoVendorDir = craneLib.vendorCargoDeps {
+      inherit src;
+      overrideVendorCargoPackage =
+        crate: drv:
+        if crate.name == "presto-pasta" && crate.version == "0.0.8" then
+          drv.overrideAttrs (old: {
+            patches = (old.patches or [ ]) ++ [ ./patches/optional-guest-ipv6.patch ];
+          })
+        else
+          drv;
+    };
     strictDeps = true;
     nativeBuildInputs = [ protobuf ];
     PROTOC = "${protobuf}/bin/protoc";

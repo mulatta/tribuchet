@@ -226,6 +226,7 @@ impl ActiveBuild {
                 emulator: self.ctx.emulators.get(&a.system).map(PathBuf::as_path),
                 net_isolation: self.ctx.fod_isolation,
                 net_policy: self.ctx.fod_network.clone(),
+                net_family: self.ctx.fod_family,
                 recursive_nix: self.recursive_nix(),
                 nix_daemon_socket: None,
             },

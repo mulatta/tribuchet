@@ -232,6 +232,21 @@ and `connected_seconds`.
 
 ## Fixed-output network policy
 
+On hosts without public IPv6 connectivity, set `fod-ipv4-only = true`
+in the worker settings (`services.tribuchet-worker.settings` for the
+NixOS module, or `settings.worker` for the worker flakelet). This leaves
+out the guest IPv6 address, default route, neighbor and IPv6 resolver,
+so public IPv6 connects fail immediately in the guest. IPv4 remains
+available; AAAA answers are not filtered, and IPv6-only destinations
+remain inaccessible. The default is false, preserving dual-stack guests.
+
+The IPv6 configuration option is a downstream patch against presto-pasta
+0.0.8, generated from source revision
+`a44d3f06768edee256ee79dab8e10266eb3a043a`. Upstream PR #50 was closed
+without merging, so updating the dependency alone cannot provide it.
+Remove the patch when upstream exposes an equivalent option. PR #49's
+host-connect error responses are separate and are not included here.
+
 On Linux workers with `/dev/net/tun`, fixed-output builds run in a
 private network namespace and reach the outside through the embedded
 [presto-pasta] user-mode NAT. The worker's loopback services and
